@@ -51,5 +51,3 @@ for path in img_folder:
 
     cv2.imwrite(f'output/canny_{path}', img_canny)
     cv2.imwrite(f'output/{path}', im)
-    img_folder = os.listdir('./samples/')
-    img_path = f"samples/{path}"
