@@ -2,16 +2,22 @@ import cv2, os
 import numpy as np
 import matplotlib.pyplot as plt
 
+def dog(img,k1,s1,k2,s2):
+    b1 = cv2.GaussianBlur(img,(k1, k1), s1)
+    b2 = cv2.GaussianBlur(img,(k2, k2), s2)
+    return b1 - b2
+
 img_folder = os.listdir('./easy_samples/')
 for path in img_folder:
     img_path = f"samples/{path}"
     total_pieces = 0
 
     img = cv2.imread(img_path)
-    img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+    # img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
     im = img.copy()
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    MIN_AREA = img.shape[0] * img.shape[1] * 0.001
+    MIN_AREA = img.shape[0] * img.shape[1] * 0.01
 
     kernel = np.ones((5, 5), np.uint8) 
 
@@ -21,16 +27,13 @@ for path in img_folder:
     #         for c in range(img.shape[2]):
     #             img[y,x,c] = np.clip(alpha*img[y,x,c] + beta, 0, 255)
 
-    img = cv2.GaussianBlur(img, (5, 5), 0)
-
-    # attempt to automatically determine the threshold for canny edge
-    v = np.median(img)
-    sigma = 0.33
-    lower = int(max(0, (1.0 - sigma) * v))
-    upper = int(min(255, (1.0 + sigma) * v))
+    blur_img = cv2.GaussianBlur(img, (5, 5), 0)
+    # img = cv2.divide(img, blur_img, scale=196)
+    # img = cv2.bilateralFilter(img, 9, 50, 50)
 
     # TODO: maybe don't hardcode the values?
     img_canny = cv2.Canny(img, 50, 100)
+    # img_canny = dog(img,7,7,15,15)
 
     img_canny = cv2.morphologyEx(img_canny, cv2.MORPH_CLOSE, kernel)
 
