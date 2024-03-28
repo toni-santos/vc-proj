@@ -1,13 +1,15 @@
 import cv2, os
 import numpy as np
 import matplotlib.pyplot as plt
+import json
+import argparse
 
-img_folder = os.listdir('./samples/')
-for path in img_folder:
+def run(path):
     img_path = f"samples/{path}"
     total_pieces = 0
+    objs = []
     kernel = np.ones((5, 5), np.uint8) 
-    kernel2 = np.ones((13, 13), np.uint8) 
+    kernel2 = np.ones((13, 13), np.uint8)
 
     img = cv2.imread(img_path)
     # img = cv2.resize(img, (0, 0), fx=0.70, fy=0.70)
@@ -55,9 +57,70 @@ for path in img_folder:
 
         if draw:
             total_pieces += 1
+            objs.append({
+                "xmin": x,
+                "ymin": y,
+                "xmax": x + w,
+                "ymax": y + h
+            })
             cv2.rectangle(img, (x, y), (x+w, y+h), (0, 0, 255), 2)
 
-    print(f"Total pieces: {total_pieces}")
+    return img, img_canny, total_pieces, objs
 
-    cv2.imwrite(f'output/canny_{path}', img_canny)
-    cv2.imwrite(f'output/{path}', img)
+def run_folder(folder):
+    dest = "output"
+    if folder == "easy_samples":
+        dest = "easy_output"
+
+    img_folder = os.listdir(folder)
+
+    for path in img_folder:
+        img, canny, total_pieces, objs = run(path)
+
+        print(f"{path} - Total pieces: {total_pieces}")
+
+        cv2.imwrite(f'{dest}/{path}', img)
+        cv2.imwrite(f'{dest}/canny_{path}', canny)
+
+
+def run_json(json_path):
+    res = {
+        "results": []
+    }
+
+    with open(json_path) as f:
+        data = json.load(f)
+
+    for path in data['image_files']:
+        img, canny, total_pieces, objs = run(path)
+
+        print(f"{path} - Total pieces: {total_pieces}")
+
+        cv2.imwrite(f'json_output/{path}', img)
+        cv2.imwrite(f'json_output/canny_{path}', canny)
+
+        res.get("results").append({
+            "file_name": path,
+            "num_colors": "N/A", # TODO: Implement color detection
+            "num_detections": total_pieces,
+            "detected_objects": objs
+        })
+
+    with open('json_output/results.json', 'w') as f:
+        json.dump(res, f, indent=4)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='LEGO Detector')
+
+    parser.add_argument('--folder', help='Folder path')
+    parser.add_argument('--json', help='Json path')
+
+    args = parser.parse_args()
+
+    if len(vars(args)) == 0:
+        run()
+
+    if args.folder:
+        run_folder(args.folder)
+    elif args.json:
+        run_json(args.json)
