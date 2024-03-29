@@ -4,10 +4,41 @@ import matplotlib.pyplot as plt
 import json
 import argparse
 
+def getColor(img):
+    
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
+    height, width, channels = img.shape[:3]
+
+    pixels = np.reshape(img, (height * width, channels))
+    
+    pixels = np.float32(pixels)
+    
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+    k = 3  # number of clusters 
+    _, labels, centers = cv2.kmeans(pixels, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+    
+    centers = np.uint8(centers)
+    
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    main_color_index = unique_labels[np.argmax(counts)]
+    main_color = centers[main_color_index]
+    
+    return main_color
+
+def inColorThreshold(colors, color, threshold):
+
+    for c in colors:
+        if max(abs(int(c[0]) - int(color[0])),abs(int(c[1]) - int(color[1])),abs(int(c[2]) - int(color[2]))) < threshold:
+            return True
+    return False
+
+
 def run(path):
     img_path = f"samples/{path}"
     total_pieces = 0
     objs = []
+    colors = []
     kernel = np.ones((5, 5), np.uint8) 
     kernel2 = np.ones((13, 13), np.uint8)
 
@@ -64,8 +95,12 @@ def run(path):
                 "ymax": y + h
             })
             cv2.rectangle(img, (x, y), (x+w, y+h), (0, 0, 255), 2)
+            cropped = im[y:y+h, x:x+w]
+            piece_color = tuple(getColor(cropped))
+            if not inColorThreshold(colors, piece_color,30):
+                colors.append(piece_color)
 
-    return img, img_canny, total_pieces, objs
+    return img, img_canny, total_pieces, objs, len(colors)
 
 def run_folder(folder):
     dest = "output"
@@ -75,9 +110,10 @@ def run_folder(folder):
     img_folder = os.listdir(folder)
 
     for path in img_folder:
-        img, canny, total_pieces, objs = run(path)
+        img, canny, total_pieces, objs, num_colors = run(path)
 
         print(f"{path} - Total pieces: {total_pieces}")
+        print(f"Colors: {num_colors}")
 
         cv2.imwrite(f'{dest}/{path}', img)
         cv2.imwrite(f'{dest}/canny_{path}', canny)
@@ -92,16 +128,17 @@ def run_json(json_path):
         data = json.load(f)
 
     for path in data['image_files']:
-        img, canny, total_pieces, objs = run(path)
+        img, canny, total_pieces, objs, num_colors = run(path)
 
         print(f"{path} - Total pieces: {total_pieces}")
+        print(f"Colors: {num_colors}")
 
         cv2.imwrite(f'json_output/{path}', img)
         cv2.imwrite(f'json_output/canny_{path}', canny)
 
         res.get("results").append({
             "file_name": path,
-            "num_colors": "N/A", # TODO: Implement color detection
+            "num_colors": num_colors, # TODO: Implement color detection
             "num_detections": total_pieces,
             "detected_objects": objs
         })
