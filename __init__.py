@@ -190,6 +190,10 @@ def run(path):
     return objs, len(colors)
 
 def run_folder(folder):
+    res = {
+        "results": []
+    }
+
     dest = "output"
     if folder == "easy_samples":
         dest = "easy_output"
@@ -198,6 +202,17 @@ def run_folder(folder):
 
     for path in img_folder:
         objs, num_colors = run(path)
+
+        res.get("results").append({
+            "file_name": path,
+            "num_colors": num_colors,
+            "num_detections": len(objs),
+            "detected_objects": objs
+        })
+
+    with open(f'{dest}/results.json', 'w') as f:
+        json.dump(res, f, indent=4)
+
 
 def run_json(json_path):
     res = {
