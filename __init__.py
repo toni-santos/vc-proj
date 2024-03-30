@@ -83,10 +83,11 @@ def canny(img, canny_lower, canny_upper, threshold, maxval):
 
     return contours, img_canny
 
-def findPieces(contours, img, img_og, MIN_AREA):
+def findPieces(contours, img, img_og, MIN_AREA, gc = False):
     print("Finding pieces...")
     start_time = time.time()
 
+    copy_og = img_og.copy()
     objs = []
     colors = []
 
@@ -108,7 +109,7 @@ def findPieces(contours, img, img_og, MIN_AREA):
                 break
 
         if draw:
-            cv2.rectangle(img, (x, y), (x+w, y+h), (0, 0, 255), 2)
+            cv2.rectangle(copy_og, (x, y), (x+w, y+h), (0, 0, 255), 2)
 
             objs.append({
                 "xmin": x,
@@ -125,7 +126,7 @@ def findPieces(contours, img, img_og, MIN_AREA):
 
     print(f"Found {len(objs)} pieces and {len(colors)} colors in {time.time() - start_time} seconds")
 
-    return colors, objs
+    return colors, objs, copy_og
 
 def run(path):
     print(f"Running on {path}")
@@ -148,7 +149,8 @@ def run(path):
     contours, img_canny = canny(img, canny_lower, canny_upper, threshold, maxval)
     cv2.imwrite(f'json_output/canny_{path}', img_canny)
 
-    colors, objs = findPieces(contours, img, img_og, MIN_AREA)
+    colors, objs, img_pieces = findPieces(contours, img, img_og, MIN_AREA)
+    cv2.imwrite(f'json_output/{path}', img_pieces)
 
     if len(objs) > MAX_PIECES:
         print("Found too many pieces, running GrabCut...")
@@ -170,11 +172,12 @@ def run(path):
         contours, img_canny = canny(img, canny_lower, canny_upper, threshold, maxval)
         cv2.imwrite(f'json_output/canny_{path}', img_canny)
 
-        new_colors, new_objs = findPieces(contours, img, img_og, MIN_AREA)
+        new_colors, new_objs, img_pieces = findPieces(contours, img, img_og, MIN_AREA, gc=True)
 
         if len(new_objs) < len(objs):
             print("GrabCut pieces result is better")
             objs = new_objs
+            cv2.imwrite(f'json_output/{path}', img_pieces)
         else:
             print("Original pieces result is better")
 
@@ -184,8 +187,6 @@ def run(path):
             colors = new_colors
         else:
             print("Original colors result is better")
-
-    cv2.imwrite(f'json_output/{path}', img)
 
     return objs, len(colors)
 
