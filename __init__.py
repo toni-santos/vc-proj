@@ -5,6 +5,40 @@ import json
 import argparse
 import time
 
+def overlapOverThreshold(rect1, rect2, area_threshold):
+    # Two rects overlap by more than 60% of the area of either rectangle?
+    x1_overlap = max(0, min(rect1[2], rect2[2]) - max(rect1[0], rect2[0]))
+    y1_overlap = max(0, min(rect1[3], rect2[3]) - max(rect1[1], rect2[1]))
+    overlap_area = x1_overlap * y1_overlap
+
+    area_rect1 = (rect1[2] - rect1[0]) * (rect1[3] - rect1[1])
+    area_rect2 = (rect2[2] - rect2[0]) * (rect2[3] - rect2[1])
+
+    total_area = area_rect1 + area_rect2 - overlap_area
+
+    overlap_percentage = max((overlap_area / area_rect1) * 100, (overlap_area / area_rect2) * 100)
+    print(overlap_percentage)
+
+    return overlap_percentage > area_threshold
+
+def overlapUnion(rect1, rect2, threshold):
+    if (rect1[0] - rect2[2] >= threshold or 
+        rect2[0] - rect1[2] >= threshold or
+        rect1[1] - rect2[3] >= threshold or 
+        rect2[1] - rect1[3] >= threshold):
+        return None
+
+    print("Merging: ", rect1, rect2)
+
+    x1 = min(rect1[0], rect2[0])
+    y1 = min(rect1[1], rect2[1])
+    x2 = max(rect1[2], rect2[2])
+    y2 = max(rect1[3], rect2[3])
+    
+
+    # x y w h
+    return [x1, y1, x2-x1, y2-y1]
+
 def getColor(img):
     
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -39,9 +73,8 @@ def preProcessing(img):
     start_time = time.time()
 
     # Denoising
-    img = cv2.fastNlMeansDenoisingColored(img,None,10,7,21)
-
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img = cv2.fastNlMeansDenoising(img,None,23,7,21)
     
     # Histogram equalization
     img = cv2.equalizeHist(img)
@@ -67,7 +100,7 @@ def canny(img, canny_lower, canny_upper, threshold, maxval):
     kernel = np.ones((5, 5), np.uint8) 
 
     # Canny edge detection
-    img_canny = cv2.Canny(img, 50, 80)
+    img_canny = cv2.Canny(img, 50, 70)
 
     # Morphological operations
     img_canny = cv2.morphologyEx(img_canny, cv2.MORPH_DILATE, kernel, iterations=1)
@@ -86,43 +119,81 @@ def canny(img, canny_lower, canny_upper, threshold, maxval):
 def findPieces(contours, img, img_og, MIN_AREA, gc = False):
     print("Finding pieces...")
     start_time = time.time()
-
     copy_og = img_og.copy()
     objs = []
     colors = []
+    overlap = True
+    draw = True
+    MIN_OVERLAP_AREA = MIN_AREA * 0.5
+    pop_list = []
+    rects = [cv2.boundingRect(cntr) for cntr in contours]
+    while overlap or not draw:
+        overlap = False
+        for idx, rect in enumerate(list(rects)):
+            draw = True
+            if (idx == 0):
+                rects_copy = rects
+                rects = []
+            print("Current rect: ", idx)
+            x,y,w,h = rect
+            area = w * h
+            if area < MIN_OVERLAP_AREA:
+                continue
+            print(x, y, w, h)
+            MAX_DIST = min(img.shape[0], img.shape[1]) * 0.003
+            print("max_dist: ", MAX_DIST)
 
-    for idx, cntr in enumerate(contours):
-        x,y,w,h = cv2.boundingRect(cntr)
-        area = w * h
-        draw = True
-
-        if area < MIN_AREA:
-            continue
-
-        for n_idx, n_cntr in enumerate(contours):
-            x1,y1,w1,h1 = cv2.boundingRect(n_cntr)
-            n_area = cv2.contourArea(n_cntr)
+            for n_idx, n_rect in enumerate(list(rects_copy)):
+                print("Checking with: ", n_idx)
+                x1,y1,w1,h1 = n_rect
+                n_area = w1*h1
+                # Check if the current contour is inside another contour and vice-versa
+                if (n_idx != idx) and (x >= x1 and y >= y1 and x+w <= x1+w1 and y+h <= y1+h1):
+                    print("inside")
+                    draw = False
+                    break
+                # Check if the current contour is inside/overlapping another contour
+                elif (n_idx != idx) and (overlapOverThreshold([x, y, x+w, y+h], [x1, y1, x1+w1, y1+h1], 60)
+                    ):
+                    print("overlap")
+                    overlap = True
+                    x, y, w, h = overlapUnion([x, y, x+w, y+h], [x1, y1, x1+w1, y1+h1], MAX_DIST)
+                    print("Joined rect size: ", x, y, w, h)
+                elif (n_idx != idx) and (overlapUnion([x, y, x+w, y+h], [x1, y1, x1+w1, y1+h1], MAX_DIST)
+                    and n_area < MIN_AREA):
+                    print("overlap")
+                    overlap = True
+                    x, y, w, h = overlapUnion([x, y, x+w, y+h], [x1, y1, x1+w1, y1+h1], MAX_DIST)
+                    print("Joined rect size: ", x, y, w, h)
             
-            # Check if the current contour is inside another contour
-            if idx != n_idx and (x >= x1 and y >= y1 and x+w <= x1+w1 and y+h <= y1+h1):
-                draw = False
-                break
+            area = w * h
+            if area < MIN_AREA:
+                print("Area too small")
+                continue
+            if draw:
+                rects.append([x, y, w, h])
+            print(rects)
+            rects = sorted(rects)
+            rects = [rects[i] for i in range(len(rects)) if i == 0 or rects[i] != rects[i-1]]
+    for rect in rects:
+        x, y, w, h = rect
+        print("size: ", w, img.shape[1])
+        if (w/img.shape[1] > 0.8) or (h/img.shape[0] > 0.8):
+            continue
+        cv2.rectangle(copy_og, (x, y), (x+w, y+h), (0, 0, 255), 2)
 
-        if draw:
-            cv2.rectangle(copy_og, (x, y), (x+w, y+h), (0, 0, 255), 2)
+        objs.append({
+            "xmin": x,
+            "ymin": y,
+            "xmax": x + w,
+            "ymax": y + h
+        })
 
-            objs.append({
-                "xmin": x,
-                "ymin": y,
-                "xmax": x + w,
-                "ymax": y + h
-            })
-
-            # Calculate the main color of the piece
-            cropped = img_og[y:y+h, x:x+w]
-            piece_color = tuple(getColor(cropped))
-            if not inColorThreshold(colors, piece_color,30):
-                colors.append(piece_color)
+        # Calculate the main color of the piece
+        cropped = img_og[y:y+h, x:x+w]
+        piece_color = tuple(getColor(cropped))
+        if not inColorThreshold(colors, piece_color,30):
+            colors.append(piece_color)
 
     print(f"Found {len(objs)} pieces and {len(colors)} colors in {time.time() - start_time} seconds")
 
@@ -142,7 +213,7 @@ def run(path):
     img = cv2.imread(img_path)
     # img = cv2.resize(img, (0, 0), fx=0.70, fy=0.70)
     img_og = img.copy()
-    MIN_AREA = img.shape[0] * img.shape[1] * 0.001
+    MIN_AREA = img.shape[0] * img.shape[1] * 0.006
 
     img = preProcessing(img)
 
