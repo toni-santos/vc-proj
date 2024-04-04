@@ -5,6 +5,40 @@ import json
 import argparse
 import time
 
+def connectedComponents(img, MIN_AREA, unprocessed = False):
+    output = img.copy()
+    largest_area = 0
+
+    objs = []
+
+    if unprocessed:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    thresh = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+    numLabels, labels, stats, _ = cv2.connectedComponentsWithStats(thresh, 4, cv2.CV_32S)
+    
+    for i in range(0, numLabels):
+        if i == 0:
+            continue
+
+        x = stats[i, cv2.CC_STAT_LEFT]
+        y = stats[i, cv2.CC_STAT_TOP]
+        w = stats[i, cv2.CC_STAT_WIDTH]
+        h = stats[i, cv2.CC_STAT_HEIGHT]
+        area = stats[i, cv2.CC_STAT_AREA]
+
+        if (area < MIN_AREA):
+            continue
+
+        if (area > largest_area):
+            largest_area = area
+
+        objs.append({"x": x, "y": y, "w": w, "h": h, "area": area})
+        # cv2.rectangle(output, (x, y), (x + w, y + h), (0, 255, 0), 3)
+        # componentMask = (labels == i).astype("uint8") * 255
+
+    return objs, largest_area
+
 def overlapOverThreshold(rect1, rect2, area_threshold):
     # Two rects overlap by more than 60% of the area of either rectangle?
     x1_overlap = max(0, min(rect1[2], rect2[2]) - max(rect1[0], rect2[0]))
@@ -17,7 +51,7 @@ def overlapOverThreshold(rect1, rect2, area_threshold):
     total_area = area_rect1 + area_rect2 - overlap_area
 
     overlap_percentage = max((overlap_area / area_rect1) * 100, (overlap_area / area_rect2) * 100)
-    print(overlap_percentage)
+    # print(overlap_percentage)
 
     return overlap_percentage > area_threshold
 
@@ -28,7 +62,7 @@ def overlapUnion(rect1, rect2, threshold):
         rect2[1] - rect1[3] >= threshold):
         return None
 
-    print("Merging: ", rect1, rect2)
+    # print("Merging: ", rect1, rect2)
 
     x1 = min(rect1[0], rect2[0])
     y1 = min(rect1[1], rect2[1])
@@ -93,27 +127,33 @@ def preProcessing(img):
     
     return img
 
-def canny(img, canny_lower, canny_upper, threshold, maxval):
+def canny(img, canny_lower, canny_upper, threshold, maxval, tentative):
     print("Running Canny edge detection...")
     start_time = time.time()
-
     kernel = np.ones((5, 5), np.uint8) 
+    contours = []
+    
+    for obj in tentative:
+        x, y, w, h = obj["x"], obj["y"], obj["w"], obj["h"]
+        zone = img[y:y+h, x:x+w]
 
-    # Canny edge detection
-    img_canny = cv2.Canny(img, 50, 70)
+        # Canny edge detection
+        img_canny = cv2.Canny(zone, canny_lower, canny_upper)
 
-    # Morphological operations
-    img_canny = cv2.morphologyEx(img_canny, cv2.MORPH_DILATE, kernel, iterations=1)
-    img_canny = cv2.morphologyEx(img_canny, cv2.MORPH_CLOSE, kernel, iterations=2)
+        # Morphological operations
+        img_canny = cv2.morphologyEx(img_canny, cv2.MORPH_DILATE, kernel, iterations=1)
+        img_canny = cv2.morphologyEx(img_canny, cv2.MORPH_CLOSE, kernel, iterations=2)
 
-    # Thresholding
-    thresh = cv2.threshold(img_canny, 100, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+        # Thresholding
+        thresh = cv2.threshold(img_canny, threshold, maxval, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
 
-    # Find contours
-    contours = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    contours = contours[0] if len(contours) == 2 else contours[1]
+        # Find contours
+        found = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        found = found[0] if len(found) == 2 else found[1]
+        found = [[x + x1, y + y1, w1, h1] for x1, y1, w1, h1 in [cv2.boundingRect(c) for c in found]]
+        contours.extend(found)
+
     print(f"Canny edge detection done in {time.time() - start_time} seconds")
-
     return contours, img_canny
 
 def findPieces(contours, img, img_og, MIN_AREA, gc = False):
@@ -126,7 +166,7 @@ def findPieces(contours, img, img_og, MIN_AREA, gc = False):
     draw = True
     MIN_OVERLAP_AREA = MIN_AREA * 0.5
     pop_list = []
-    rects = [cv2.boundingRect(cntr) for cntr in contours]
+    rects = contours
     while overlap or not draw:
         overlap = False
         for idx, rect in enumerate(list(rects)):
@@ -134,50 +174,50 @@ def findPieces(contours, img, img_og, MIN_AREA, gc = False):
             if (idx == 0):
                 rects_copy = rects
                 rects = []
-            print("Current rect: ", idx)
+            # print("Current rect: ", idx)
             x,y,w,h = rect
             area = w * h
             if area < MIN_OVERLAP_AREA:
                 continue
-            print(x, y, w, h)
+            # print(x, y, w, h)
             MAX_DIST = min(img.shape[0], img.shape[1]) * 0.003
-            print("max_dist: ", MAX_DIST)
+            # print("max_dist: ", MAX_DIST)
 
             for n_idx, n_rect in enumerate(list(rects_copy)):
-                print("Checking with: ", n_idx)
+                # print("Checking with: ", n_idx)
                 x1,y1,w1,h1 = n_rect
                 n_area = w1*h1
                 # Check if the current contour is inside another contour and vice-versa
                 if (n_idx != idx) and (x >= x1 and y >= y1 and x+w <= x1+w1 and y+h <= y1+h1):
-                    print("inside")
+                    # print("inside")
                     draw = False
                     break
                 # Check if the current contour is inside/overlapping another contour
                 elif (n_idx != idx) and (overlapOverThreshold([x, y, x+w, y+h], [x1, y1, x1+w1, y1+h1], 60)
                     ):
-                    print("overlap")
+                    # print("overlap")
                     overlap = True
                     x, y, w, h = overlapUnion([x, y, x+w, y+h], [x1, y1, x1+w1, y1+h1], MAX_DIST)
-                    print("Joined rect size: ", x, y, w, h)
+                    # print("Joined rect size: ", x, y, w, h)
                 elif (n_idx != idx) and (overlapUnion([x, y, x+w, y+h], [x1, y1, x1+w1, y1+h1], MAX_DIST)
                     and n_area < MIN_AREA):
-                    print("overlap")
+                    # print("overlap")
                     overlap = True
                     x, y, w, h = overlapUnion([x, y, x+w, y+h], [x1, y1, x1+w1, y1+h1], MAX_DIST)
-                    print("Joined rect size: ", x, y, w, h)
+                    # print("Joined rect size: ", x, y, w, h)
             
             area = w * h
             if area < MIN_AREA:
-                print("Area too small")
+                # print("Area too small")
                 continue
             if draw:
                 rects.append([x, y, w, h])
-            print(rects)
+            # print(rects)
             rects = sorted(rects)
             rects = [rects[i] for i in range(len(rects)) if i == 0 or rects[i] != rects[i-1]]
     for rect in rects:
         x, y, w, h = rect
-        print("size: ", w, img.shape[1])
+        # print("size: ", w, img.shape[1])
         if (w/img.shape[1] > 0.8) or (h/img.shape[0] > 0.8):
             continue
         cv2.rectangle(copy_og, (x, y), (x+w, y+h), (0, 0, 255), 2)
@@ -204,20 +244,47 @@ def run(path):
 
     img_path = f"samples/{path}"
     canny_lower = 50
-    canny_upper = 80
-    threshold = 100
+    canny_upper = 70
+    threshold = 0
     maxval = 255
     MAX_PIECES = 30
+    tentative = []
 
     # Read image
     img = cv2.imread(img_path)
     # img = cv2.resize(img, (0, 0), fx=0.70, fy=0.70)
     img_og = img.copy()
-    MIN_AREA = img.shape[0] * img.shape[1] * 0.006
+    IMG_AREA = img.shape[0] * img.shape[1]
+    MAX_AREA = IMG_AREA * 0.5
+    MIN_AREA = IMG_AREA * 0.004
 
+    # Run connected component analysis
+    cc1, a1 = connectedComponents(img,MIN_AREA, unprocessed=True)
     img = preProcessing(img)
+    cc2, a2 = connectedComponents(img,MIN_AREA)
+    test = img_og.copy()
 
-    contours, img_canny = canny(img, canny_lower, canny_upper, threshold, maxval)
+    if len(cc1) > len(cc2):
+        tentative = cc1
+    else:
+        tentative = cc2
+
+    # if a1 > MAX_AREA:
+    #     if a2 > MAX_AREA:
+    #         if a1 > a2:
+    #             tentative = cc2
+    #         else:
+    #             tentative = cc1
+    #     else:
+    #         tentative = cc2
+    # elif a2 > MAX_AREA:
+    #     tentative = cc1
+    # elif a1 > a2:
+    #     tentative = cc1
+    # else:
+    #     tentative = cc2
+
+    contours, img_canny = canny(img, canny_lower, canny_upper, threshold, maxval, tentative)
     cv2.imwrite(f'json_output/canny_{path}', img_canny)
 
     colors, objs, img_pieces = findPieces(contours, img, img_og, MIN_AREA)
