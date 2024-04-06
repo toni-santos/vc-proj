@@ -5,8 +5,6 @@ import json
 import argparse
 import time
 
-
-
 # INFO: connectedComponents was previously implemented and part of the solution however it was not used in the final version of the code, keeping it as an artifact 
 def connectedComponents(img, MIN_AREA, unprocessed = False):
     output = img.copy()
@@ -99,7 +97,6 @@ def getColorBGR(img):
     _, labels, centers = cv2.kmeans(pixels, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
     
     centers = np.uint8(centers)
-    
     
     unique_labels, counts = np.unique(labels, return_counts=True)
     main_color_index = unique_labels[np.argmax(counts)]
@@ -216,12 +213,6 @@ def findPieces(contours, img, img_og, MIN_AREA, path):
 
         rects = [list(i) for i in set(tuple(i) for i in rects)]
 
-    test = img_og.copy()
-    for rect in rects:
-        x, y, w, h = rect
-        cv2.rectangle(test, (x, y), (x + w, y + h), (0, 255, 0), 1)
-    cv2.imwrite(f'json_output/rects_{path}', test)
-
     for rect in rects:
         x, y, w, h = rect
 
@@ -260,7 +251,6 @@ def findPieces(contours, img, img_og, MIN_AREA, path):
             area_ = w_ * h_
             skip = False
 
-
             if area_ < ZONE_MIN_AREA:
                 continue
 
@@ -273,7 +263,6 @@ def findPieces(contours, img, img_og, MIN_AREA, path):
                 if inContour(c, n_rect):
                     skip = True
                     break
-
 
             x_ = x + x_ 
             y_ = y + y_
@@ -293,7 +282,6 @@ def findPieces(contours, img, img_og, MIN_AREA, path):
              # Calculate the main color of the piece
             cropped = img_og[y_:y_+h_, x_:x_+w_]
             piece_color = tuple(getColorBGR(cropped))
-            print(piece_color)
             if not inColorThreshold(colors, piece_color,28):
                 colors.append(piece_color)  
 
@@ -303,17 +291,21 @@ def findPieces(contours, img, img_og, MIN_AREA, path):
 
 def run(path):
     print(f"Running on {path}")
-
-    img_path = f"samples/{path}"
+    # TODO: change this to the path of the images
+    img_location = "./"
+    img_path = img_location + path
 
     # TODO: tweak these values
-    canny_lower = 20
-    canny_upper = 50
+    canny_lower = 50
+    canny_upper = 70
     threshold = 0
     maxval = 255
 
     # Read image
     img = cv2.imread(img_path)
+    if img is None:
+        print(f"Could not read image {img_path}")
+        return [], 0
     img_og = img.copy()
 
     IMG_AREA = img.shape[0] * img.shape[1]
@@ -323,12 +315,10 @@ def run(path):
     img = preProcessing(img)
 
     contours, img_canny = canny(img, canny_lower, canny_upper, threshold, maxval)
-
-    
-    cv2.imwrite(f'json_output/canny_{path}', img_canny)
+    # cv2.imwrite(f'json_output/canny_{path}', img_canny)
 
     colors, objs, img_pieces = findPieces(contours, img, img_og, MIN_AREA, path)
-    cv2.imwrite(f'json_output/{path}', img_pieces)
+    # cv2.imwrite(f'json_output/{path}', img_pieces)
 
     return objs, len(colors)
 
@@ -375,7 +365,7 @@ def run_json(json_path):
             "detected_objects": objs
         })
 
-    with open('json_output/results.json', 'w') as f:
+    with open('json_output/output.json', 'w') as f:
         json.dump(res, f, indent=4)
 
 if __name__ == "__main__":
@@ -393,3 +383,5 @@ if __name__ == "__main__":
         run_folder(args.folder)
     elif args.json:
         run_json(args.json)
+    else:
+        run_json("input.json")
