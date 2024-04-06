@@ -5,36 +5,7 @@ import json
 import argparse
 import time
 
-# color dictionary
-COLORDICT= {
-    # "Red": [(0, 60)],
-    "Yellow": [(20, 40)],
-    "Green": [(41, 70)],
-    "Cyan": [(71, 100)],
-    "Blue": [(101, 130)],
-    "Magenta": [(131, 160)]
-}
 
-def getColorName(color):
-
-    color = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
-
-    h, s, v = cv2.split(color)   # H = 0-179, S = 0-255, V = 0-255
-
-    if v < 30:
-        return "Black"
-    
-    if s < 30:
-        if v > 230:
-            return "White"
-        return "Gray"
-    
-    for color_name, ranges in COLORDICT.items():
-        for start, end in ranges:
-            if start <= h <= end:
-                return color_name
-
-    return "Red"
 
 # INFO: connectedComponents was previously implemented and part of the solution however it was not used in the final version of the code, keeping it as an artifact 
 def connectedComponents(img, MIN_AREA, unprocessed = False):
@@ -124,10 +95,11 @@ def getColorBGR(img):
     pixels = np.float32(pixels)
     
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-    k = 3  # number of clusters 
+    k = 1  # number of clusters 
     _, labels, centers = cv2.kmeans(pixels, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
     
     centers = np.uint8(centers)
+    
     
     unique_labels, counts = np.unique(labels, return_counts=True)
     main_color_index = unique_labels[np.argmax(counts)]
@@ -288,11 +260,26 @@ def findPieces(contours, img, img_og, MIN_AREA, path):
             area_ = w_ * h_
             skip = False
 
-            if area < ZONE_MIN_AREA:
+
+            if area_ < ZONE_MIN_AREA:
                 continue
+
+            for n_idx, n_rect in enumerate(contours_):
+
+                if n_idx == idx:
+                    continue
+
+                # Check if the current contour is inside another contour
+                if inContour(c, n_rect):
+                    skip = True
+                    break
+
 
             x_ = x + x_ 
             y_ = y + y_
+
+            if skip:
+                continue
 
             cv2.rectangle(copy_og, (x_, y_), (x_ + w_, y_ + h_), (0, 0, 255), 1)
 
@@ -303,19 +290,12 @@ def findPieces(contours, img, img_og, MIN_AREA, path):
                 "ymax": y_ + h_
             })
 
+             # Calculate the main color of the piece
             cropped = img_og[y_:y_+h_, x_:x_+w_]
-            piece_color = list(getColorBGR(cropped))
-            split = img_og[0:1,0:1]
-            split = np.array([[piece_color]])
-            # cv2.namedWindow('color', cv2.WINDOW_NORMAL)
-            # cv2.imshow('color', split)
-            # cv2.waitKey(0)
-            # cv2.destroyAllWindows()
-            print(split)
-            color = getColorName(split)
-
-            if color not in colors:
-                colors.append(color)    
+            piece_color = tuple(getColorBGR(cropped))
+            print(piece_color)
+            if not inColorThreshold(colors, piece_color,28):
+                colors.append(piece_color)  
 
     print(f"Found {len(objs)} pieces and {len(colors)} ({colors}) colors in {time.time() - start_time} seconds")
 
@@ -327,8 +307,8 @@ def run(path):
     img_path = f"samples/{path}"
 
     # TODO: tweak these values
-    canny_lower = 50
-    canny_upper = 70
+    canny_lower = 20
+    canny_upper = 50
     threshold = 0
     maxval = 255
 
@@ -343,7 +323,9 @@ def run(path):
     img = preProcessing(img)
 
     contours, img_canny = canny(img, canny_lower, canny_upper, threshold, maxval)
-    # cv2.imwrite(f'json_output/canny_{path}', img_canny)
+
+    
+    cv2.imwrite(f'json_output/canny_{path}', img_canny)
 
     colors, objs, img_pieces = findPieces(contours, img, img_og, MIN_AREA, path)
     cv2.imwrite(f'json_output/{path}', img_pieces)
